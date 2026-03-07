@@ -1,0 +1,19 @@
+[project]
+name = "causal-turbine"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "causalml>=0.16.0",
+    "dowhy>=0.12",
+    "econml>=0.16.0",
+    "graphviz>=0.21",
+    "marimo>=0.20.4",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.2",
+    "pandas>=3.0.1",
+    "scikit-learn>=1.6.1",
+    "seaborn>=0.13.2",
+    "ucimlrepo>=0.0.7",
+]
