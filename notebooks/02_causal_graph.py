@@ -171,100 +171,91 @@ def visualize_graph(causal_graph):
 
 
 @app.cell
-def identify_and_estimate_nox(causal_graph, df, mo):
-    def _():
-        from dowhy import CausalModel
+def the_puzzle(df, mo):
+    mo.md(f"""
+    ## The Puzzle: What does TIT do to NOX?
 
-        # Create the causal model: we want the effect of TIT on NOX
-        model_nox = CausalModel(
-            data=df,
-            treatment="TIT",
-            outcome="NOX",
-            graph=causal_graph,
-        )
+    We built a graph that says TIT → NOX (hotter flame → more NOx, via Zeldovich
+    kinetics). Physics says this should be a **positive** effect.
 
-        # Identify: DoWhy applies the backdoor criterion automatically
-        estimand_nox = model_nox.identify_effect(method_name="default")
+    But before we use any causal tools, let's just look at the raw data and see
+    what a naive analysis tells us. This is what you'd get from standard ML.
 
-        # Estimate with linear regression (backdoor adjustment)
-        estimate_nox = model_nox.estimate_effect(
-            estimand_nox,
-            method_name="backdoor.linear_regression",
-            test_significance=True,
-        )
+    **Raw correlation between TIT and NOX: {df['TIT'].corr(df['NOX']):.3f}**
 
-        return mo.md(
-            f"""
-            ## Identification & Estimation: TIT → NOX
-
-            DoWhy applied the backdoor criterion to our graph and found:
-
-            ```
-            {estimand_nox}
-            ```
-
-            The **backdoor variables** are the ones DoWhy says we must control for.
-            These are exactly the confounders — variables that cause both TIT and NOX.
-
-            Notice: TAT, TEY, CDP are **not** in the adjustment set, even though they
-            correlate with NOX. They're downstream of TIT (mediators), and controlling
-            for them would block the causal pathway we're trying to measure.
-
-            ---
-
-            ### Linear Regression Estimate
-
-            {estimate_nox}
-
-            Controlling for the backdoor variables, each 1°C increase
-            in TIT causes approximately **{estimate_nox.value:.3f} mg/m³ change in NOX**.
-
-            But this assumes a constant, linear effect. The domain knowledge says NOX
-            increases **exponentially** with temperature (Zeldovich kinetics).
-            A linear model is a rough first approximation — we'll use more flexible
-            estimators (EconML's DML, causal forests) in the next notebook.
-            """
-        )
-
-    _()
+    It's *negative*. Higher TIT is associated with *lower* NOX.
+    That contradicts thermodynamics. What's going on?
+    """)
     return
 
 
 @app.cell
-def naive_vs_adjusted(df, mo):
+def simpsons_paradox(df, mo):
     def _():
+        import matplotlib.pyplot as plt
         import numpy as np
-        from sklearn.linear_model import LinearRegression
 
-        # Naive: just regress NOX on TIT, ignoring confounders
-        X_naive = df[["TIT"]].values
-        y = df["NOX"].values
-        naive = LinearRegression().fit(X_naive, y)
-        naive_coef = naive.coef_[0]
+        fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 
-        # Adjusted: include the backdoor variables
-        X_adjusted = df[["TIT", "AT", "AP", "AH", "AFDP"]].values
-        adjusted = LinearRegression().fit(X_adjusted, y)
-        adjusted_coef = adjusted.coef_[0]  # TIT coefficient
+        # Panel 1: raw scatter
+        axes[0].scatter(df["TIT"], df["NOX"], alpha=0.1, s=3, color="#888")
+        z = np.polyfit(df["TIT"], df["NOX"], 1)
+        x_line = np.linspace(df["TIT"].min(), df["TIT"].max(), 100)
+        axes[0].plot(x_line, np.polyval(z, x_line), "r-", lw=2, label=f"slope = {z[0]:.3f}")
+        axes[0].set_xlabel("TIT (°C)")
+        axes[0].set_ylabel("NOX (mg/m³)")
+        axes[0].set_title("Naive: TIT vs NOX")
+        axes[0].legend()
+
+        # Panel 2: colored by AT — reveals the confounder
+        sc = axes[1].scatter(df["TIT"], df["NOX"], c=df["AT"], cmap="coolwarm", alpha=0.2, s=3)
+        axes[1].set_xlabel("TIT (°C)")
+        axes[1].set_ylabel("NOX (mg/m³)")
+        axes[1].set_title("Same plot, colored by Ambient Temp (AT)")
+        plt.colorbar(sc, ax=axes[1], label="AT (°C)")
+
+        # Panel 3: split by cold vs hot days
+        q25, q75 = df["AT"].quantile(0.25), df["AT"].quantile(0.75)
+        cold = df[df["AT"] < q25]
+        hot = df[df["AT"] > q75]
+
+        axes[2].scatter(cold["TIT"], cold["NOX"], alpha=0.15, s=3,
+                        label=f"Cold days (AT < {q25:.0f}°C)", color="#4a9eff")
+        axes[2].scatter(hot["TIT"], hot["NOX"], alpha=0.15, s=3,
+                        label=f"Hot days (AT > {q75:.0f}°C)", color="#ff6b6b")
+
+        # Trend lines within each group
+        for subset, color in [(cold, "#4a9eff"), (hot, "#ff6b6b")]:
+            z_sub = np.polyfit(subset["TIT"], subset["NOX"], 1)
+            x_sub = np.linspace(subset["TIT"].min(), subset["TIT"].max(), 100)
+            axes[2].plot(x_sub, np.polyval(z_sub, x_sub), color=color, lw=2)
+
+        axes[2].set_xlabel("TIT (°C)")
+        axes[2].set_ylabel("NOX (mg/m³)")
+        axes[2].set_title("Simpson's Paradox")
+        axes[2].legend()
+
+        plt.tight_layout()
+        plt.show()
 
         return mo.md(
-            f"""
-            ## Naive vs. Adjusted: Seeing Confounding Bias
+            """
+            ### Simpson's Paradox in action
 
-            | Approach | TIT coefficient (effect on NOX per °C) |
-            |----------|---------------------------------------|
-            | **Naive** (no controls) | {naive_coef:.4f} |
-            | **Adjusted** (backdoor controls) | {adjusted_coef:.4f} |
+            **Left:** The overall trend is negative — higher TIT, lower NOX. This is wrong.
 
-            The difference between these two numbers **is confounding bias**.
+            **Middle:** Color by AT and the structure appears. Blue dots (cold days) sit
+            at high NOX. Red dots (hot days) sit at low NOX. AT is driving NOX far more
+            than TIT is.
 
-            The naive estimate mixes up TIT's real effect with the effect of ambient
-            conditions that happen to correlate with TIT. The adjusted estimate isolates
-            TIT's causal contribution by holding confounders constant.
+            **Right:** Split the data by temperature. *Within* cold days and *within* hot
+            days, the TIT→NOX relationship is weakly positive (as physics predicts). But
+            pool them together and the trend reverses — because AT has such a strong
+            negative effect on NOX that it overwhelms TIT.
 
-            This is the core of causal inference: same data, same outcome, but a
-            fundamentally different answer depending on whether you account for
-            the causal structure.
+            **This is confounding.** AT causes both TIT (hot days → operators raise TIT)
+            and NOX (hot air → lower density → cooler flame → less NOX). If you don't
+            account for AT, you get the wrong sign.
             """
         )
 
@@ -273,20 +264,248 @@ def naive_vs_adjusted(df, mo):
 
 
 @app.cell
-def identify_and_estimate_co(causal_graph, df, mo):
+def backdoor_paths(mo):
+    mo.md("""
+    ## Backdoor Paths: Why Confounding Happens
+
+    Look at the graph. There are paths from TIT to NOX that go *backwards*
+    through a shared cause:
+
+    ```
+    TIT  ←  AT  →  NOX     (AT causes both — "backdoor path")
+    TIT  ←  AP  →  NOX     (AP causes both — another backdoor path)
+    ```
+
+    These paths carry correlation that is NOT causal. When AT goes up:
+    - TIT goes up (operators compensate) — so TIT and NOX move together via AT
+    - But NOX goes *down* (hot air → less dense → cooler flame)
+
+    This creates a spurious **negative** association between TIT and NOX.
+
+    ### The Backdoor Criterion
+
+    The fix: **block every backdoor path** by controlling for the variables on them.
+
+    If we hold AT constant (compare readings at the *same* ambient temperature
+    but *different* TIT), the backdoor path is blocked. Same for AP.
+
+    That's it. The "backdoor criterion" is just: find all the backdoor paths,
+    pick variables to block them, and make sure you don't accidentally block
+    the real causal path (don't control for mediators like TAT or TEY).
+    """)
+    return
+
+
+@app.cell
+def why_not_mediators(mo):
+    mo.md("""
+    ## What NOT to Control For
+
+    It's tempting to throw every variable into the regression. But controlling
+    for the wrong variables is just as dangerous as not controlling at all.
+
+    **Mediators (TAT, TEY, CDP):** These are *downstream* of TIT.
+
+    ```
+    TIT → TAT → (part of the effect on emissions)
+    ```
+
+    If you hold TAT constant, you're blocking part of TIT's real causal effect.
+    You'd be asking: "what's the effect of TIT, if TIT had no effect on TAT?"
+    — which is a different (and usually less useful) question.
+
+    **Colliders:** If two causes point into the same node, conditioning on that
+    node *opens* a spurious path instead of closing one. Our graph doesn't have
+    an obvious collider problem, but it's a common trap.
+
+    **Rule of thumb:** Control for variables that are *causes of both* treatment
+    and outcome (confounders). Don't control for anything that's a *consequence*
+    of treatment.
+    """)
+    return
+
+
+@app.cell
+def dowhy_identification(causal_graph, df, mo):
+    from dowhy import CausalModel
+
+    # Hand the graph to DoWhy and ask: "what should I control for?"
+    model_nox = CausalModel(
+        data=df,
+        treatment="TIT",
+        outcome="NOX",
+        graph=causal_graph,
+    )
+
+    # DoWhy tries multiple identification strategies
+    estimand_nox = model_nox.identify_effect(method_name="default")
+
+    mo.md(
+        f"""
+        ## DoWhy: Automated Identification
+
+        We give DoWhy our graph and ask: "how can I estimate TIT → NOX?"
+
+        It tries **four strategies** and reports which ones are feasible:
+
+        | Strategy | Idea | Result |
+        |----------|------|--------|
+        | **Backdoor** | Control for common causes of TIT and NOX | Found: control for AT, AP |
+        | **IV** (instrumental variable) | Find a variable that affects TIT but not NOX directly | Not found (AT, AP all directly affect NOX too) |
+        | **Frontdoor** | Go through a mediator that confounders don't affect | Not found |
+        | **General adjustment** | Mathematical generalization | Same as backdoor |
+
+        The backdoor strategy works. DoWhy says: **control for AT and AP**.
+
+        The mathematical expression `d/d[TIT] (E[NOX|AT,AP])` means:
+        "the change in expected NOX per unit change in TIT, holding AT and AP constant."
+
+        ### The Unconfoundedness Assumption
+
+        DoWhy also prints a warning: this only works if there are no *unmeasured*
+        confounders beyond AT and AP. If some hidden variable (e.g., grid demand)
+        causes both TIT and NOX and we didn't include it, our estimate is biased.
+        That's a real concern — we'll come back to it with refutation tests.
+        """
+    )
+    return estimand_nox, model_nox
+
+
+@app.cell
+def naive_regression(df, mo):
+    from sklearn.linear_model import LinearRegression
+
+    # Step 1: the WRONG way — ignore confounders
+    naive = LinearRegression().fit(df[["TIT"]], df["NOX"])
+    naive_coef = naive.coef_[0]
+
+    # Step 2: the RIGHT way — control for backdoor variables
+    adjusted = LinearRegression().fit(df[["TIT", "AT", "AP"]], df["NOX"])
+    adj_tit = adjusted.coef_[0]
+    adj_at = adjusted.coef_[1]
+
+    mo.md(
+        f"""
+        ## Naive vs. Adjusted: Seeing the Bias
+
+        | Approach | TIT coefficient | Interpretation |
+        |----------|----------------|----------------|
+        | **Naive** (NOX ~ TIT) | {naive_coef:+.4f} | Wrong sign! Confounding. |
+        | **Adjusted** (NOX ~ TIT + AT + AP) | {adj_tit:+.4f} | Still negative... |
+
+        Both give a negative coefficient. Controlling for AT and AP *reduces* the
+        bias (the coefficient moves toward zero), but it's still negative.
+
+        For comparison, the AT coefficient is **{adj_at:+.4f}** — ten times larger
+        than TIT's. Ambient temperature dominates this system.
+
+        **So was our physics wrong?** Not necessarily. There are two issues:
+        """
+    )
+    return
+
+
+@app.cell
+def why_linear_fails(df, mo):
+    def _():
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        # Panel 1: NOX vs TIT is nonlinear — most of the action is at the edges
+        axes[0].scatter(df["TIT"], df["NOX"], alpha=0.08, s=3, color="#888")
+        axes[0].set_xlabel("TIT (°C)")
+        axes[0].set_ylabel("NOX (mg/m³)")
+        axes[0].set_title("TIT vs NOX — is a line appropriate?")
+        axes[0].axvline(x=1060, color="red", ls="--", alpha=0.5, label="most data here")
+        axes[0].axvline(x=1100, color="red", ls="--", alpha=0.5)
+        # Mark the dense region
+        mask = (df["TIT"] > 1060) & (df["TIT"] < 1100)
+        axes[0].annotate(
+            f"{mask.mean():.0%} of data\nin this band",
+            xy=(1080, 100), fontsize=11, ha="center",
+            bbox=dict(boxstyle="round", fc="lightyellow"),
+        )
+
+        # Panel 2: NOX vs AT — much clearer, more spread
+        axes[1].scatter(df["AT"], df["NOX"], alpha=0.08, s=3, color="#888")
+        axes[1].set_xlabel("AT (°C)")
+        axes[1].set_ylabel("NOX (mg/m³)")
+        axes[1].set_title("AT vs NOX — much wider range, clearer signal")
+
+        plt.tight_layout()
+        plt.show()
+
+        return mo.md(
+            """
+            ### Why the linear estimate is misleading
+
+            **Problem 1 — Narrow range:** TIT spans only 1000-1100°C. Most data is
+            clustered between 1060-1100°C. The Zeldovich mechanism produces exponential
+            NOX growth, but over a 40°C range, the curve looks nearly flat. A linear fit
+            over a flat region picks up noise and confounding instead of the real signal.
+
+            **Problem 2 — Nonlinearity:** Even if we had a wider range, a straight line
+            is the wrong functional form for an exponential relationship. The true effect
+            of TIT on NOX accelerates at higher temperatures.
+
+            **Problem 3 — AT dominates:** AT spans -6°C to 37°C (a 43°C range) and
+            has a clear, strong negative relationship with NOX. In a linear regression,
+            AT eats all the explanatory power, leaving TIT with whatever residual
+            variation is left — which is mostly noise.
+
+            **Conclusion:** The linear regression is a bad tool for this job. We need
+            a method that can handle nonlinearity. That's what notebook 03 is for
+            (Double Machine Learning).
+            """
+        )
+
+    _()
+    return
+
+
+@app.cell
+def estimate_with_dowhy(estimand_nox, mo, model_nox):
+    # Go ahead and run DoWhy's linear estimate — but now we understand its limits
+    estimate_nox = model_nox.estimate_effect(
+        estimand_nox,
+        method_name="backdoor.linear_regression",
+        test_significance=True,
+    )
+
+    mo.md(
+        f"""
+        ## DoWhy's Linear Estimate (for reference)
+
+        DoWhy's backdoor linear regression gives: **{estimate_nox.value:.3f}** mg/m³ per °C.
+
+        We now understand why this is negative:
+        1. The backdoor criterion correctly identifies AT, AP as confounders
+        2. But the linear functional form is wrong for this relationship
+        3. TIT has a narrow range where the true (exponential) effect is weak
+        4. AT's strong effect leaves little variation for TIT to explain
+
+        The identification step (backdoor criterion) was correct — it told us
+        *what* to control for. The estimation step (linear regression) was the
+        problem — it assumed the wrong shape.
+
+        **The fix isn't more confounders. It's a more flexible estimator.**
+        """
+    )
+    return
+
+
+@app.cell
+def co_estimate(causal_graph, df, mo):
     def _():
         from dowhy import CausalModel
 
         model_co = CausalModel(
-            data=df,
-            treatment="TIT",
-            outcome="CO",
-            graph=causal_graph,
+            data=df, treatment="TIT", outcome="CO", graph=causal_graph,
         )
-
         estimand_co = model_co.identify_effect(method_name="default")
-
-        estimate_co_linear = model_co.estimate_effect(
+        estimate_co = model_co.estimate_effect(
             estimand_co,
             method_name="backdoor.linear_regression",
             test_significance=True,
@@ -294,18 +513,14 @@ def identify_and_estimate_co(causal_graph, df, mo):
 
         return mo.md(
             f"""
-            ## Identification & Estimation: TIT → CO
+            ## Quick Check: TIT → CO
 
-            ```
-            {estimand_co}
-            ```
+            DoWhy's linear estimate for CO: **{estimate_co.value:.3f}** mg/m³ per °C.
 
-            ### Linear Regression Estimate
-
-            {estimate_co_linear}
-
-            Negative coefficient — as expected. Higher TIT → more complete
-            combustion → less CO. This is the other side of the tradeoff.
+            Negative — as expected. Higher TIT → more complete combustion → less CO.
+            This one has the right sign because the CO-TIT relationship is more
+            monotonic and closer to linear over this range. But the magnitude is still
+            suspect for the same reasons (narrow range, nonlinearity).
             """
         )
 
@@ -316,25 +531,26 @@ def identify_and_estimate_co(causal_graph, df, mo):
 @app.cell
 def next_steps(mo):
     mo.md("""
-    ## What we've done and what's next
+    ## What We've Learned
 
-    **Done:**
-    1. Drew a causal DAG encoding domain knowledge (physics, not statistics)
-    2. DoWhy applied the backdoor criterion to find the right adjustment set
-    3. Estimated the Average Treatment Effect (ATE) of TIT on NOX and CO
-    4. Saw how confounding bias changes the estimate
+    1. **The causal graph** encodes domain knowledge about what causes what
+    2. **Backdoor paths** are spurious pathways through common causes (AT, AP)
+    3. **The backdoor criterion** says: block these paths by controlling for confounders
+    4. **Don't control for mediators** (TAT, TEY, CDP) — they're part of the causal effect
+    5. **Simpson's paradox** is real: the raw TIT-NOX correlation has the wrong sign
+    6. **Linear regression fails** here because TIT's effect is nonlinear and its range is narrow
 
-    **Limitations of what we just did:**
-    - Linear regression assumes a constant, linear effect — but NOX vs TIT is nonlinear
-    - We estimated one number (the ATE) — but the effect likely varies by conditions
-      (e.g., TIT might matter more on hot days than cold days)
-    - We haven't tested how sensitive our estimates are to DAG misspecification
+    ## What's Next (Notebook 03)
 
-    **Next (notebook 03):**
-    - Use EconML's Double Machine Learning (DML) for flexible, nonlinear estimation
-    - Estimate heterogeneous treatment effects with causal forests
-      ("the effect of TIT on NOX is *different* depending on ambient conditions")
-    - Refutation tests: how robust are our results if our DAG is slightly wrong?
+    The identification was right. The estimation was wrong. We need methods that:
+
+    - Handle **nonlinear** treatment effects (not just a straight line)
+    - Can detect **heterogeneous effects** (TIT's effect might differ on hot vs cold days)
+    - Still respect the causal graph (control for the right variables)
+
+    That's exactly what **Double Machine Learning (DML)** does: use flexible ML
+    models (random forests, gradient boosting) to control for confounders, while
+    still producing valid causal estimates. Coming up next.
     """)
     return
 
