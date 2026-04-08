@@ -372,6 +372,21 @@ def dowhy_identification(causal_graph, df, mo):
 
 
 @app.cell
+def raw_estimand(estimand_nox, mo):
+    mo.md(f"""
+    ## DoWhy's Raw Identification Report
+
+    This is what `identify_effect()` returns — the graph's answer to
+    "can we estimate TIT → NOX, and how?"
+
+    ```
+    {str(estimand_nox)}
+    ```
+    """)
+    return
+
+
+@app.cell
 def naive_regression(df, mo):
     from sklearn.linear_model import LinearRegression
 

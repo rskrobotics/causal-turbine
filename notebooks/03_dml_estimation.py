@@ -35,51 +35,49 @@ def load_data():
     from pathlib import Path
 
     df = pd.read_csv(Path(__file__).parent / "../data/gas_turbine_emissions.csv")
-    return df, np, pd
+    return df, np
 
 
 @app.cell
 def dml_intuition(mo):
-    mo.md(
-        """
-        ## The DML Idea: Strip Out the Confounders, Then Look at What's Left
+    mo.md("""
+    ## The DML Idea: Strip Out the Confounders, Then Look at What's Left
 
-        The problem with linear regression wasn't the backdoor criterion — it correctly
-        told us to control for AT and AP. The problem was *how* we controlled for them.
+    The problem with linear regression wasn't the backdoor criterion — it correctly
+    told us to control for AT and AP. The problem was *how* we controlled for them.
 
-        Linear regression assumes every relationship is a straight line. But AT's effect
-        on NOX is nonlinear, and squeezing it into a line distorts everything.
+    Linear regression assumes every relationship is a straight line. But AT's effect
+    on NOX is nonlinear, and squeezing it into a line distorts everything.
 
-        **DML's trick is simple:**
+    **DML's trick is simple:**
 
-        1. Use a flexible ML model (gradient boosting, random forest) to predict
-           **NOX from confounders only** (AT, AP, AH). Call the prediction error the
-           "NOX residual" — the part of NOX that confounders can't explain.
+    1. Use a flexible ML model (gradient boosting, random forest) to predict
+       **NOX from confounders only** (AT, AP, AH). Call the prediction error the
+       "NOX residual" — the part of NOX that confounders can't explain.
 
-        2. Use another flexible ML model to predict **TIT from confounders only**.
-           The "TIT residual" is the part of TIT that confounders can't explain.
+    2. Use another flexible ML model to predict **TIT from confounders only**.
+       The "TIT residual" is the part of TIT that confounders can't explain.
 
-        3. Now ask: does the TIT residual predict the NOX residual? If yes,
-           that's the causal effect — because we've already removed everything
-           the confounders could account for.
+    3. Now ask: does the TIT residual predict the NOX residual? If yes,
+       that's the causal effect — because we've already removed everything
+       the confounders could account for.
 
-        ```
-        Standard regression:     NOX ~ TIT + AT + AP       (all linear — bad)
+    ```
+    Standard regression:     NOX ~ TIT + AT + AP       (all linear — bad)
 
-        DML:  Step 1:  NOX_residual = NOX - ML_predict(NOX from AT, AP, AH)
-              Step 2:  TIT_residual = TIT - ML_predict(TIT from AT, AP, AH)
-              Step 3:  NOX_residual ~ TIT_residual        (causal estimate)
-        ```
+    DML:  Step 1:  NOX_residual = NOX - ML_predict(NOX from AT, AP, AH)
+          Step 2:  TIT_residual = TIT - ML_predict(TIT from AT, AP, AH)
+          Step 3:  NOX_residual ~ TIT_residual        (causal estimate)
+    ```
 
-        The "double" in DML = two ML models (one for each residual). The ML models
-        can be as flexible as needed — they handle all the nonlinear confounding.
-        """
-    )
+    The "double" in DML = two ML models (one for each residual). The ML models
+    can be as flexible as needed — they handle all the nonlinear confounding.
+    """)
     return
 
 
 @app.cell
-def dml_by_hand(df, np, mo):
+def dml_by_hand(df, mo, np):
     def _():
         from sklearn.ensemble import GradientBoostingRegressor
         from sklearn.model_selection import cross_val_predict
@@ -174,7 +172,7 @@ def dml_by_hand(df, np, mo):
 
 
 @app.cell
-def the_effect_varies(df, np, mo):
+def the_effect_varies(df, mo, np):
     def _():
         import matplotlib.pyplot as plt
 
@@ -249,33 +247,31 @@ def the_effect_varies(df, np, mo):
 
 @app.cell
 def econml_dml_intro(mo):
-    mo.md(
-        """
-        ## EconML: Proper DML with Heterogeneous Effects
+    mo.md("""
+    ## EconML: Proper DML with Heterogeneous Effects
 
-        We'll now use EconML's `CausalForestDML` — a method that:
+    We'll now use EconML's `CausalForestDML` — a method that:
 
-        1. Does the DML residualization (strips out confounders with flexible ML)
-        2. Fits a **causal forest** on the residuals to discover how the effect
-           varies across conditions
+    1. Does the DML residualization (strips out confounders with flexible ML)
+    2. Fits a **causal forest** on the residuals to discover how the effect
+       varies across conditions
 
-        A causal forest is like a random forest, but instead of predicting Y,
-        it predicts the *treatment effect* at each point. It automatically finds
-        which variables (AT, AP, AH) modify the effect and how.
+    A causal forest is like a random forest, but instead of predicting Y,
+    it predicts the *treatment effect* at each point. It automatically finds
+    which variables (AT, AP, AH) modify the effect and how.
 
-        We need to specify:
-        - **Y** — outcome (NOX)
-        - **T** — treatment (TIT)
-        - **W** — confounders to control for (AT, AP, AH — the backdoor variables)
-        - **X** — effect modifiers (which conditions might change the effect?)
-          We'll use AT, since we just saw it flips the sign.
-        """
-    )
+    We need to specify:
+    - **Y** — outcome (NOX)
+    - **T** — treatment (TIT)
+    - **W** — confounders to control for (AT, AP, AH — the backdoor variables)
+    - **X** — effect modifiers (which conditions might change the effect?)
+      We'll use AT, since we just saw it flips the sign.
+    """)
     return
 
 
 @app.cell
-def fit_causal_forest_nox(df, np):
+def fit_causal_forest_nox(df):
     from econml.dml import CausalForestDML
     from sklearn.ensemble import GradientBoostingRegressor
 
@@ -300,7 +296,7 @@ def fit_causal_forest_nox(df, np):
 
 
 @app.cell
-def visualize_cate_nox(cf_nox, df, np, mo):
+def visualize_cate_nox(cf_nox, df, mo, np):
     def _():
         import matplotlib.pyplot as plt
 
@@ -379,7 +375,7 @@ def visualize_cate_nox(cf_nox, df, np, mo):
 
 
 @app.cell
-def fit_causal_forest_co(df, np, mo):
+def fit_causal_forest_co(df, mo, np):
     def _():
         from econml.dml import CausalForestDML
         from sklearn.ensemble import GradientBoostingRegressor
@@ -445,27 +441,25 @@ def fit_causal_forest_co(df, np, mo):
 
 @app.cell
 def what_if_header(mo):
-    mo.md(
-        """
-        ## Asking Causal Questions: "What If...?"
+    mo.md("""
+    ## Asking Causal Questions: "What If...?"
 
-        This is the payoff. We now have a fitted causal model that can answer
-        interventional questions — Pearl's Rung 2.
+    This is the payoff. We now have a fitted causal model that can answer
+    interventional questions — Pearl's Rung 2.
 
-        These are NOT predictions ("what NOX do we expect to see when TIT = 1080?").
-        They are interventions ("if we *set* TIT to 1080, what *would* NOX be,
-        regardless of what TIT would normally be on a day like this?").
+    These are NOT predictions ("what NOX do we expect to see when TIT = 1080?").
+    They are interventions ("if we *set* TIT to 1080, what *would* NOX be,
+    regardless of what TIT would normally be on a day like this?").
 
-        The difference matters: a prediction mixes in confounding (what kind of day
-        leads to TIT = 1080?), an intervention strips it out (what would happen if
-        we reached in and turned the dial to 1080, on any given day?).
-        """
-    )
+    The difference matters: a prediction mixes in confounding (what kind of day
+    leads to TIT = 1080?), an intervention strips it out (what would happen if
+    we reached in and turned the dial to 1080, on any given day?).
+    """)
     return
 
 
 @app.cell
-def what_if_questions(cf_nox, np, mo):
+def what_if_questions(cf_nox, mo, np):
     def _():
         import matplotlib.pyplot as plt
 
@@ -540,7 +534,7 @@ def what_if_questions(cf_nox, np, mo):
 
 
 @app.cell
-def counterfactual(df, cf_nox, np, mo):
+def counterfactual(cf_nox, df, mo, np):
     def _():
         import matplotlib.pyplot as plt
 
@@ -626,25 +620,23 @@ def counterfactual(df, cf_nox, np, mo):
 
 @app.cell
 def refutation_header(mo):
-    mo.md(
-        """
-        ## Refutation: How Robust Are These Results?
+    mo.md("""
+    ## Refutation: How Robust Are These Results?
 
-        All our estimates depend on assumptions:
-        1. The causal graph is correct (no missing confounders)
-        2. The backdoor criterion gives a valid adjustment set
-        3. The ML models are flexible enough
+    All our estimates depend on assumptions:
+    1. The causal graph is correct (no missing confounders)
+    2. The backdoor criterion gives a valid adjustment set
+    3. The ML models are flexible enough
 
-        We can't prove these assumptions are right, but we can *stress-test* them.
-        If small violations of assumptions destroy our results, we should be worried.
-        If the results survive, we gain confidence (not certainty).
-        """
-    )
+    We can't prove these assumptions are right, but we can *stress-test* them.
+    If small violations of assumptions destroy our results, we should be worried.
+    If the results survive, we gain confidence (not certainty).
+    """)
     return
 
 
 @app.cell
-def refutation_random_confounder(df, np, mo):
+def refutation_random_confounder(df, mo, np):
     def _():
         from econml.dml import CausalForestDML
         from sklearn.ensemble import GradientBoostingRegressor
@@ -741,51 +733,208 @@ def refutation_random_confounder(df, np, mo):
 
 @app.cell
 def summary(mo):
-    mo.md(
-        """
-        ## Summary: What We've Built
+    mo.md("""
+    ## Summary: What We've Built
 
-        ### The Causal Estimation Pipeline
+    ### The Causal Estimation Pipeline
 
-        ```
-        Domain Knowledge → Causal Graph → Backdoor Criterion → DML Estimation → Causal Queries
-              (physics)      (notebook 02)    (DoWhy)           (EconML)         (what-if)
-        ```
+    ```
+    Domain Knowledge → Causal Graph → Backdoor Criterion → DML Estimation → Causal Queries
+          (physics)      (notebook 02)    (DoWhy)           (EconML)         (what-if)
+    ```
 
-        ### Key Findings
+    ### Key Findings
 
-        1. **TIT's effect on NOX is heterogeneous** — it depends on ambient temperature.
-           On cold days higher TIT *reduces* NOX; on hot days it *increases* NOX.
+    1. **TIT's effect on NOX is heterogeneous** — it depends on ambient temperature.
+       On cold days higher TIT *reduces* NOX; on hot days it *increases* NOX.
 
-        2. **The average effect is near zero**, which is misleading. Reporting just
-           the ATE hides a sign flip that matters for operations.
+    2. **The average effect is near zero**, which is misleading. Reporting just
+       the ATE hides a sign flip that matters for operations.
 
-        3. **TIT's effect on CO is consistently negative** — higher TIT always
-           reduces CO (more complete combustion), regardless of ambient conditions.
+    3. **TIT's effect on CO is consistently negative** — higher TIT always
+       reduces CO (more complete combustion), regardless of ambient conditions.
 
-        4. **Actionable insight:** On cold days, running hotter is free —
-           you get more power and less of *both* emissions. On hot days,
-           there's a real CO-NOX tradeoff to manage.
+    4. **Actionable insight:** On cold days, running hotter is free —
+       you get more power and less of *both* emissions. On hot days,
+       there's a real CO-NOX tradeoff to manage.
 
-        ### What We Can Now Do
+    ### What We Can Now Do
 
-        With the fitted causal forest, we can answer:
+    With the fitted causal forest, we can answer:
 
-        - **Interventional:** "If we set TIT to X on a day with AT=Y, what happens to NOX?"
-        - **Counterfactual:** "This reading had TIT=1050. If it had been 1080, what would NOX be?"
-        - **Policy:** "At what AT threshold should we switch operating strategies?"
+    - **Interventional:** "If we set TIT to X on a day with AT=Y, what happens to NOX?"
+    - **Counterfactual:** "This reading had TIT=1050. If it had been 1080, what would NOX be?"
+    - **Policy:** "At what AT threshold should we switch operating strategies?"
 
-        These are **causal** answers, not correlational predictions. They account for
-        confounding and tell us what would happen if we *intervened*, not just what
-        we'd *observe*.
+    These are **causal** answers, not correlational predictions. They account for
+    confounding and tell us what would happen if we *intervened*, not just what
+    we'd *observe*.
 
-        ### What's Next (Notebook 04)
+    ### What's Next (Notebook 04)
 
-        Build an interactive "what if?" tool — a simple interface where you dial in
-        conditions and TIT, and see the predicted causal effect on emissions.
-        The query engine that sits on top of everything we've built.
-        """
-    )
+    Build an interactive "what if?" tool — a simple interface where you dial in
+    conditions and TIT, and see the predicted causal effect on emissions.
+    The query engine that sits on top of everything we've built.
+    """)
+    return
+
+
+@app.cell
+def sensitivity_header(mo):
+    mo.md("""
+    ## Sensitivity Analysis: How Strong Would a Hidden Confounder Need to Be?
+
+    The refutation tests above checked that the method works correctly.
+    But they can't answer the real worry: **what if we missed a confounder?**
+
+    Suppose there's a hidden variable U (e.g., grid demand, fuel composition)
+    that causes both TIT and NOX, and we didn't include it. Our estimate
+    would be biased. But *how* biased?
+
+    Sensitivity analysis answers: "how strongly correlated with TIT and NOX
+    would U need to be to destroy our main finding (the sign flip)?"
+
+    If the answer is "U would need to explain 50% of both" — we can relax.
+    If "U only needs to explain 5% of both" — we should worry.
+
+    **The approach:** We simulate U at different strengths, add it to the
+    confounder set, re-run the causal forest, and watch what happens to
+    the CATE curve.
+    """)
+    return
+
+
+@app.cell
+def sensitivity_analysis(df, mo, np):
+    def _():
+        from econml.dml import CausalForestDML
+        from sklearn.ensemble import GradientBoostingRegressor
+        import matplotlib.pyplot as plt
+
+        Y = df["NOX"].values
+        T = df["TIT"].values
+        X = df[["AT"]].values
+        W_base = df[["AT", "AP", "AH"]].values
+        at_grid = np.linspace(-5, 37, 100).reshape(-1, 1)
+        n = len(df)
+
+        # Simulate hidden confounders of increasing strength.
+        # U is constructed to correlate with both TIT and NOX at a given level.
+        # strength = fraction of T/Y variance that U "explains"
+        np.random.seed(42)
+        noise = np.random.randn(n)
+
+        strengths = [0.0, 0.05, 0.10, 0.20, 0.30]
+        results = {}
+
+        for strength in strengths:
+            if strength == 0.0:
+                W = W_base
+            else:
+                # Build U so it's correlated with both T and Y at the given strength
+                u = (
+                    strength * (T - T.mean()) / T.std()
+                    + strength * (Y - Y.mean()) / Y.std()
+                    + (1 - strength) * noise
+                )
+                W = np.column_stack([W_base, u])
+
+            cf = CausalForestDML(
+                model_y=GradientBoostingRegressor(
+                    n_estimators=100, max_depth=4, random_state=42,
+                ),
+                model_t=GradientBoostingRegressor(
+                    n_estimators=100, max_depth=4, random_state=42,
+                ),
+                n_estimators=200,
+                min_samples_leaf=20,
+                random_state=42,
+            )
+            cf.fit(Y, T, X=X, W=W)
+            effects = cf.effect(X=at_grid)
+            ate = cf.ate(X=df[["AT"]].values)
+            results[strength] = {"effects": effects, "ate": ate}
+
+        # Plot: CATE curves at different confounder strengths
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+        colors = ["#2166ac", "#67a9cf", "#fddbc7", "#ef8a62", "#b2182b"]
+        for (strength, res), color in zip(results.items(), colors):
+            label = "No hidden confounder" if strength == 0 else f"U strength = {strength:.0%}"
+            axes[0].plot(at_grid, res["effects"], color=color, lw=2, label=label)
+
+        axes[0].axhline(y=0, color="black", lw=1, ls="--")
+        axes[0].set_xlabel("Ambient Temperature (°C)")
+        axes[0].set_ylabel("Effect of +1°C TIT on NOX (mg/m³)")
+        axes[0].set_title("CATE Curve Under Hidden Confounders of Varying Strength")
+        axes[0].legend(fontsize=9)
+
+        # Bar chart: ATE at each strength
+        ate_values = [results[s]["ate"] for s in strengths]
+        bar_colors = ["#2166ac", "#67a9cf", "#fddbc7", "#ef8a62", "#b2182b"]
+        labels = ["None", "5%", "10%", "20%", "30%"]
+        axes[1].bar(labels, ate_values, color=bar_colors, edgecolor="black", alpha=0.8)
+        axes[1].set_xlabel("Hidden Confounder Strength")
+        axes[1].set_ylabel("Average Treatment Effect")
+        axes[1].set_title("ATE Stability Across Confounder Strengths")
+        axes[1].axhline(y=0, color="black", lw=1, ls="--")
+
+        for i, v in enumerate(ate_values):
+            axes[1].text(i, v + 0.002, f"{v:+.4f}", ha="center", fontsize=9)
+
+        plt.tight_layout()
+        plt.show()
+
+        # Find the sign-flip point for each strength
+        flip_points = {}
+        for strength, res in results.items():
+            eff = res["effects"].ravel()
+            sign_changes = np.where(np.diff(np.sign(eff)))[0]
+            if len(sign_changes) > 0:
+                flip_points[strength] = at_grid[sign_changes[0]][0]
+            else:
+                if eff.mean() > 0:
+                    flip_points[strength] = "always positive"
+                else:
+                    flip_points[strength] = "always negative"
+
+        flip_table = "\n".join(
+            f"| {s:.0%} | {fp if isinstance(fp, str) else f'{fp:.1f}°C'} |"
+            for s, fp in flip_points.items()
+        )
+
+        return mo.md(
+            f"""
+            ### Reading the Sensitivity Analysis
+
+            **Left panel:** Each line is the CATE curve under a different hidden
+            confounder strength. If the lines stay similar, the finding is robust.
+            If they collapse or flip, a hidden confounder could explain away our result.
+
+            **Right panel:** The ATE at each strength. Watch whether it moves toward
+            zero or changes sign.
+
+            ### Where Does the Effect Flip Sign?
+
+            | Confounder Strength | Sign-flip AT |
+            |--------------------:|-------------|
+            {flip_table}
+
+            ### Interpretation
+
+            If the sign-flip survives even at 20-30% confounder strength, that means
+            a hidden variable would need to explain a *large* fraction of both TIT and
+            NOX variation to eliminate the heterogeneous effect. Given that ambient
+            conditions already explain most of NOX variation (we saw this in the R²),
+            there's limited room for a hidden confounder to do that.
+
+            If the sign-flip disappears at low strengths (5-10%), the finding is
+            fragile — you'd want stronger domain arguments or better data before
+            trusting it.
+            """
+        )
+
+    _()
     return
 
 
