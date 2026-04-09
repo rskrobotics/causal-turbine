@@ -31,9 +31,6 @@ def intro():
         **The key insight:** Rung 3 is strictly more informative. By conditioning on the
         observed outcome, we capture unit-specific factors (unmeasured confounders, noise)
         that Rung 2 averages over. This lets us give **personalized** counterfactual answers.
-
-        We also show how this enables **real-time optimization**: given current sensor
-        readings, what TIT should we set to minimize emissions?
         """
     )
     return (mo,)
@@ -393,211 +390,6 @@ def rung3_comparison(df, r3_event, mo):
 
 
 @app.cell
-def realtime_header(mo):
-    mo.md("""
-    ---
-
-    # Real-Time Optimization
-
-    *"Given current sensor readings, what TIT should I set to minimize emissions?"*
-
-    This is the practical application. If we have live data from the turbine, we can:
-
-    1. **Observe** current conditions (AT, AP, AH) and current emissions (NOX, CO)
-    2. **Predict** counterfactual emissions for different TIT settings
-    3. **Optimize** to find the TIT that minimizes a weighted combination
-
-    This uses **Rung 3 reasoning** — we condition on the observed emissions to get
-    unit-specific predictions, not population averages.
-    """)
-    return
-
-
-@app.cell
-def realtime_inputs(data_ranges, df, mo):
-    # Simulate "current" readings — user can adjust these
-    mo.md("## Current Sensor Readings")
-
-    current_at = mo.ui.slider(
-        start=int(data_ranges["AT"][0]),
-        stop=int(data_ranges["AT"][1]),
-        value=20,
-        label="Current AT (°C)",
-        show_value=True,
-    )
-
-    current_tit = mo.ui.slider(
-        start=int(data_ranges["TIT"][0]),
-        stop=int(data_ranges["TIT"][1]),
-        value=1060,
-        label="Current TIT (°C)",
-        show_value=True,
-    )
-
-    current_nox = mo.ui.slider(
-        start=int(data_ranges["NOX"][0]),
-        stop=int(data_ranges["NOX"][1]),
-        value=70,
-        label="Current NOX (mg/m³)",
-        show_value=True,
-    )
-
-    current_co = mo.ui.slider(
-        start=0.0,
-        stop=float(data_ranges["CO"][1]),
-        value=1.5,
-        step=0.1,
-        label="Current CO (mg/m³)",
-        show_value=True,
-    )
-
-    nox_weight = mo.ui.slider(
-        start=0.0,
-        stop=1.0,
-        value=0.5,
-        step=0.1,
-        label="NOX weight (vs CO)",
-        show_value=True,
-    )
-
-    return current_at, current_co, current_nox, current_tit, nox_weight
-
-
-@app.cell
-def realtime_display_inputs(current_at, current_co, current_nox, current_tit, mo, nox_weight):
-    mo.vstack([
-        mo.md("### Ambient & Operating Conditions"),
-        mo.hstack([current_at, current_tit], justify="start"),
-        mo.md("### Observed Emissions"),
-        mo.hstack([current_nox, current_co], justify="start"),
-        mo.md("### Optimization Objective"),
-        nox_weight,
-        mo.md(f"Minimizing: **{nox_weight.value:.0%} NOX + {1-nox_weight.value:.0%} CO** (normalized)"),
-    ])
-    return
-
-
-@app.cell
-def realtime_optimize(cf_co, cf_nox, current_at, current_co, current_nox,
-                      current_tit, data_ranges, np, nox_weight):
-    # Search over TIT values to find optimal
-    tit_range = np.linspace(data_ranges["TIT"][0], data_ranges["TIT"][1], 50)
-    X_current = np.array([[current_at.value]])
-    T_current = current_tit.value
-
-    # Compute counterfactual emissions for each candidate TIT
-    opt_results = []
-    for _tit_candidate in tit_range:
-        _delta_nox = cf_nox.effect(X=X_current, T0=T_current, T1=_tit_candidate)[0]
-        _delta_co = cf_co.effect(X=X_current, T0=T_current, T1=_tit_candidate)[0]
-
-        _nox_cf = current_nox.value + _delta_nox
-        _co_cf = current_co.value + _delta_co
-
-        # Normalize for objective (use data ranges)
-        _nox_norm = (_nox_cf - data_ranges["NOX"][0]) / (data_ranges["NOX"][1] - data_ranges["NOX"][0])
-        _co_norm = (_co_cf - data_ranges["CO"][0]) / (data_ranges["CO"][1] - data_ranges["CO"][0])
-
-        _objective = nox_weight.value * _nox_norm + (1 - nox_weight.value) * _co_norm
-
-        opt_results.append({
-            "TIT": _tit_candidate,
-            "NOX_cf": _nox_cf,
-            "CO_cf": _co_cf,
-            "objective": _objective,
-            "delta_nox": _delta_nox,
-            "delta_co": _delta_co,
-        })
-
-    # Find optimum
-    best = min(opt_results, key=lambda x: x["objective"])
-    optimal_tit = best["TIT"]
-
-    return best, optimal_tit, opt_results, tit_range
-
-
-@app.cell
-def realtime_results(best, current_co, current_nox, current_tit, mo, optimal_tit):
-    delta_tit = optimal_tit - current_tit.value
-
-    if abs(delta_tit) < 2:
-        recommendation = "**Current TIT is near-optimal.** No change recommended."
-        color = "#4CAF50"
-    elif delta_tit > 0:
-        recommendation = f"**Increase TIT by {delta_tit:.0f}°C** to {optimal_tit:.0f}°C"
-        color = "#2196F3"
-    else:
-        recommendation = f"**Decrease TIT by {-delta_tit:.0f}°C** to {optimal_tit:.0f}°C"
-        color = "#FF9800"
-
-    mo.md(f"""
-    ## Optimization Result
-
-    <div style="background: {color}22; border-left: 4px solid {color}; padding: 15px; margin: 10px 0;">
-    <h3 style="margin: 0; color: {color};">{recommendation}</h3>
-    </div>
-
-    | Metric | Current | After Optimization | Change |
-    |--------|---------|-------------------|--------|
-    | TIT | {current_tit.value}°C | {optimal_tit:.0f}°C | {delta_tit:+.0f}°C |
-    | NOX | {current_nox.value:.1f} mg/m³ | {best['NOX_cf']:.1f} mg/m³ | {best['delta_nox']:+.2f} |
-    | CO | {current_co.value:.2f} mg/m³ | {best['CO_cf']:.2f} mg/m³ | {best['delta_co']:+.3f} |
-
-    **Note:** These predictions are personalized to the current observed emissions,
-    not population averages. This is Rung 3 reasoning in action.
-    """)
-    return
-
-
-@app.cell
-def realtime_plot(best, current_co, current_nox, current_tit, np, optimal_tit, opt_results):
-    def _():
-        import matplotlib.pyplot as plt
-
-        tits = [r["TIT"] for r in opt_results]
-        noxs = [r["NOX_cf"] for r in opt_results]
-        cos = [r["CO_cf"] for r in opt_results]
-        objs = [r["objective"] for r in opt_results]
-
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-
-        # NOX vs TIT
-        axes[0].plot(tits, noxs, "b-", lw=2)
-        axes[0].axhline(y=current_nox.value, color="gray", ls="--", label="Current")
-        axes[0].axvline(x=current_tit.value, color="gray", ls="--")
-        axes[0].scatter([optimal_tit], [best["NOX_cf"]], color="red", s=100, zorder=5, label="Optimal")
-        axes[0].set_xlabel("TIT (°C)")
-        axes[0].set_ylabel("NOX (mg/m³)")
-        axes[0].set_title("Counterfactual NOX")
-        axes[0].legend()
-
-        # CO vs TIT
-        axes[1].plot(tits, cos, "g-", lw=2)
-        axes[1].axhline(y=current_co.value, color="gray", ls="--", label="Current")
-        axes[1].axvline(x=current_tit.value, color="gray", ls="--")
-        axes[1].scatter([optimal_tit], [best["CO_cf"]], color="red", s=100, zorder=5, label="Optimal")
-        axes[1].set_xlabel("TIT (°C)")
-        axes[1].set_ylabel("CO (mg/m³)")
-        axes[1].set_title("Counterfactual CO")
-        axes[1].legend()
-
-        # Objective vs TIT
-        axes[2].plot(tits, objs, "purple", lw=2)
-        axes[2].axvline(x=current_tit.value, color="gray", ls="--", label="Current")
-        axes[2].scatter([optimal_tit], [best["objective"]], color="red", s=100, zorder=5, label="Optimal")
-        axes[2].set_xlabel("TIT (°C)")
-        axes[2].set_ylabel("Objective (lower is better)")
-        axes[2].set_title("Weighted Objective")
-        axes[2].legend()
-
-        plt.tight_layout()
-        plt.show()
-
-    _()
-    return
-
-
-@app.cell
 def effect_curve_section(mo):
     mo.md("""
     ---
@@ -782,7 +574,6 @@ def interpretation_guide(mo):
     |----------|-----|-----|
     | Planning future operations | **Rung 2** | No specific event to condition on yet |
     | Evaluating a past decision | **Rung 3** | We observed the actual outcome |
-    | Real-time optimization | **Rung 3** | Current emissions inform the counterfactual |
     | Policy analysis / average effects | **Rung 2** | Interested in population-level effects |
 
     ### Limitations
@@ -864,10 +655,6 @@ def summary(mo):
 
     4. **Rung 3 enables personalization** — by conditioning on observed outcomes,
        we can give answers tailored to the specific state of the system
-
-    5. **Real-time optimization is possible** — with current sensor readings,
-       we can recommend TIT settings that minimize emissions *for this specific
-       moment*, not just on average
 
     The ladder of causation isn't just philosophy — it has practical implications
     for how precisely we can answer "what if?" questions.
