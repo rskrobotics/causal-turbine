@@ -81,7 +81,6 @@ def load_and_fit():
         "NOX": (df["NOX"].min(), df["NOX"].max()),
         "CO": (df["CO"].min(), df["CO"].max()),
     }
-
     return cf_co, cf_nox, data_ranges, df, np
 
 
@@ -132,13 +131,12 @@ def ui_controls(data_ranges, mo):
         label="Target TIT (intervention)",
         show_value=True,
     )
-
     return at_slider, tit_baseline, tit_target
 
 
 @app.cell
 def display_controls(at_slider, mo, tit_baseline, tit_target):
-    controls = mo.vstack([
+    mo.vstack([
         mo.md("### Operating Conditions"),
         mo.hstack([at_slider], justify="start"),
         mo.md("### TIT Intervention"),
@@ -146,7 +144,7 @@ def display_controls(at_slider, mo, tit_baseline, tit_target):
         mo.md(f"**Intervention:** TIT {tit_baseline.value}°C → {tit_target.value}°C "
               f"(Δ = {tit_target.value - tit_baseline.value:+d}°C)"),
     ])
-    return (controls,)
+    return
 
 
 @app.cell
@@ -163,12 +161,20 @@ def compute_effects(at_slider, cf_co, cf_nox, np, tit_baseline, tit_target):
     # Confidence intervals
     r2_nox_ci = cf_nox.effect_interval(X=X_query, T0=r2_T0, T1=r2_T1, alpha=0.05)
     r2_co_ci = cf_co.effect_interval(X=X_query, T0=r2_T0, T1=r2_T1, alpha=0.05)
-
     return r2_T0, r2_T1, r2_co_ci, r2_delta_co, r2_delta_nox, r2_nox_ci
 
 
 @app.cell
-def display_results(r2_T0, r2_T1, at_slider, r2_co_ci, r2_delta_co, r2_delta_nox, mo, r2_nox_ci):
+def display_results(
+    at_slider,
+    mo,
+    r2_T0,
+    r2_T1,
+    r2_co_ci,
+    r2_delta_co,
+    r2_delta_nox,
+    r2_nox_ci,
+):
     def format_effect(val, ci_lo, ci_hi, unit="mg/m³"):
         color = "#ff6b6b" if val > 0 else "#4a9eff"
         direction = "increases" if val > 0 else "decreases"
@@ -177,7 +183,7 @@ def display_results(r2_T0, r2_T1, at_slider, r2_co_ci, r2_delta_co, r2_delta_nox
     nox_result = format_effect(r2_delta_nox, r2_nox_ci[0][0], r2_nox_ci[1][0])
     co_result = format_effect(r2_delta_co, r2_co_ci[0][0], r2_co_ci[1][0])
 
-    results = mo.md(
+    mo.md(
         f"""
         ## Causal Effects
 
@@ -197,7 +203,7 @@ def display_results(r2_T0, r2_T1, at_slider, r2_co_ci, r2_delta_co, r2_delta_nox
         backdoor adjustment from notebook 02.
         """
     )
-    return (results,)
+    return
 
 
 @app.cell
@@ -262,7 +268,6 @@ def rung3_event_selector(df, mo):
         label="Counterfactual TIT (what if TIT had been...)",
         show_value=True,
     )
-
     return event_dropdown, tit_cf
 
 
@@ -304,14 +309,38 @@ def rung3_compute(cf_co, cf_nox, df, event_dropdown, np, tit_cf):
     # For Rung 2, we'd use population baseline, but let's show the effect only
     r3_nox_ci = cf_nox.effect_interval(X=r3_X_event, T0=r3_T_obs, T1=r3_T_cf, alpha=0.05)
     r3_co_ci = cf_co.effect_interval(X=r3_X_event, T0=r3_T_obs, T1=r3_T_cf, alpha=0.05)
-
-    return (r3_T_cf, r3_T_obs, r3_X_event, r3_Y_co_cf, r3_Y_co_obs, r3_Y_nox_cf, r3_Y_nox_obs,
-            r3_co_ci, r3_delta_co, r3_delta_nox, r3_event, r3_idx, r3_nox_ci)
+    return (
+        r3_T_cf,
+        r3_T_obs,
+        r3_Y_co_cf,
+        r3_Y_co_obs,
+        r3_Y_nox_cf,
+        r3_Y_nox_obs,
+        r3_co_ci,
+        r3_delta_co,
+        r3_delta_nox,
+        r3_event,
+        r3_idx,
+        r3_nox_ci,
+    )
 
 
 @app.cell
-def rung3_results(r3_T_cf, r3_T_obs, r3_Y_co_cf, r3_Y_co_obs, r3_Y_nox_cf, r3_Y_nox_obs,
-                  r3_co_ci, r3_delta_co, r3_delta_nox, r3_event, r3_idx, mo, r3_nox_ci):
+def rung3_results(
+    mo,
+    r3_T_cf,
+    r3_T_obs,
+    r3_Y_co_cf,
+    r3_Y_co_obs,
+    r3_Y_nox_cf,
+    r3_Y_nox_obs,
+    r3_co_ci,
+    r3_delta_co,
+    r3_delta_nox,
+    r3_event,
+    r3_idx,
+    r3_nox_ci,
+):
     def format_change(delta, ci_lo, ci_hi):
         color = "#ff6b6b" if delta > 0 else "#4a9eff"
         arrow = "↑" if delta > 0 else "↓"
@@ -354,7 +383,7 @@ def rung3_results(r3_T_cf, r3_T_obs, r3_Y_co_cf, r3_Y_co_obs, r3_Y_nox_cf, r3_Y_
 
 
 @app.cell
-def rung3_comparison(df, r3_event, mo):
+def rung3_comparison(df, mo, r3_event):
     # Show how Rung 3 differs from Rung 2 by comparing to other events at similar AT
     at_val = r3_event["AT"]
     similar_events = df[(df["AT"] > at_val - 1) & (df["AT"] < at_val + 1)]
